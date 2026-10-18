@@ -20,8 +20,9 @@ Den Grundriss auswählen (die Plan-Gruppe von Plan Import oder lose Kanten) und 
 - **Klick auf eine Wand** schaltet sie an/aus.
 - **Klick auf eine Öffnung** schaltet Fenster → Tür → keine Öffnung.
 - **Umschalt-Klick** auf eine andere Fläche der Zeichnung (z. B. eine dicke Stütze) nimmt sie als Wand dazu.
-- **Live-Vorschau** (wie in allen PESI3D-Plugins): das Mauerwerk steht sofort im Modell und folgt jeder Änderung — so sieht man, ob alle Wände erwischt sind. **Zurücksetzen** = Standardwerte und Vorauswahl.
-- **Erzeugen** übernimmt alles als **eine Gruppe** (BIM: `IfcWall`) in einem Undo-Schritt; **Abbrechen** nimmt die Vorschau zurück.
+- **Live Preview** (wie in allen PESI3D-Plugins): das Mauerwerk steht sofort im Modell und folgt jeder Änderung — so sieht man, ob alle Wände erwischt sind. **Reset** = Standardwerte und Vorauswahl.
+- **Follow selection**: einen anderen Grundriss auswählen, die Wände folgen; **↻ Read selection** liest die Auswahl sofort.
+- **OK** übernimmt alles als **eine Gruppe** (BIM: `IfcWall`) in einem Undo-Schritt; **Cancel** nimmt die Vorschau zurück.
 
 ### Wände nach Linienart (mit Plan Import ≥ 1.2)
 CAD-Programme zeichnen geschnittene Wände auf ihre eigene Art — meist gefüllt, sonst mit dem dicksten Stift. Ein mit **Plan Import 1.2** importiertes Blatt merkt sich, wie jede Linie gezeichnet war. Der Dialog zeigt dann die Liste **Linienarten aus dem PDF** (Farbfeld, Füllung oder Strichstärke, Fläche oder Länge):
@@ -54,6 +55,7 @@ Fensterbänder und Glasfassaden breiter als *Max. Öffnungsbreite* (Vorgabe 4 m)
 Tipp: Mit Plan Import nur den Grundriss zuschneiden (Crop), dann stören Plankopf und Rahmen nicht.
 
 ## Änderungen
+- **1.2** — Vorschau wie in allen PESI3D-Plugins: Zeile **Quelle** mit *Follow selection* (einen anderen Grundriss wählen, die Wände folgen) und *↻ Read selection*; Knöpfe *● Live Preview ON · Reset · OK · Cancel*. Behoben: beim Neubau der Vorschau kam eine ältere Auswahl zurück. Screenshot vom Musterhaus-Beispiel.
 - **1.1** — **Live-Vorschau** mit Banner, Zurücksetzen. Ungefüllte **Taschen** in den Wänden (Ecken, Fugen, Kreuzungen) werden geschlossen, Schächte zum Dazuklicken angeboten. **Kleinteile abwählen unter … cm²**: Rahmenprofile in Öffnungen und lose Krümel sind zu Beginn abgewählt. Behoben: zwei gleich große Füllungs-Hälften (z. B. die Dreiecke einer Gehrungsecke) galten als doppelt — eine fehlte. Wände nach **Linienart** (mit Plan Import 1.2): Liste der Linienarten, Vorauswahl der Wandfüllung, **Beispielwand anklicken**. Öffnungen: Fenster mit unterteilten Rahmen und Fensteranschlag werden als ein Fenster erkannt, Schächte zwischen zwei Wänden nicht mehr als Tür; wie die Wand gefüllte Fensterrahmen-Profile zerteilen keine Öffnung mehr. Mehrschichtige Wände gelten nicht mehr als Treppe. Fehler erscheinen als Meldung (und in `%LOCALAPPDATA%\IngeTrazo\walls_tool.log`). Große Pläne deutlich schneller.
 - **1.0** — erste Veröffentlichung.
 

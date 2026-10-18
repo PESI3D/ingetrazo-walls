@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 
 KEY = "walls_tool"
-VERSION = "1.1"
+VERSION = "1.2"
 
 _TEXTS = {
     "de": {
@@ -83,6 +83,15 @@ _TEXTS = {
         "Wall style off: {s}": "Wand-Linienart aus: {s}",
         "Preview": "Vorschau",
         "Reset": "Zurücksetzen",
+        "Source": "Quelle",
+        "Plan": "Plan",
+        "{name} — {n} lines, {s} line styles": "{name} — {n} Linien, {s} Linienarten",
+        "{n} edges (no line styles)": "{n} Kanten (ohne Linienarten)",
+        "While the dialog is open, a changed selection is read again by itself: select another floor plan and the walls follow.":
+            "Solange der Dialog offen ist, wird eine geänderte Auswahl von selbst neu gelesen: einen anderen Grundriss wählen, die Wände folgen.",
+        "Take the current selection as the source now.": "Die aktuelle Auswahl jetzt als Quelle nehmen.",
+        "Walls: no floor plan in the selection — the source stays as it is.":
+            "Mauerwerk: kein Grundriss in der Auswahl — die Quelle bleibt.",
         "Switch off pieces under": "Kleinteile abwählen unter",
         "Pieces smaller than this start switched off (window frame profiles, crumbs of the fill). 0 = keep all.":
             "Stücke kleiner als dies sind zu Beginn abgewählt (Fensterrahmen-Profile, Krümel der Füllung). 0 = alle behalten.",
@@ -153,6 +162,14 @@ _TEXTS = {
         "Wall style off: {s}": "Estilo de muro desactivado: {s}",
         "Preview": "Vista previa",
         "Reset": "Restablecer",
+        "Source": "Origen",
+        "{name} — {n} lines, {s} line styles": "{name} — {n} líneas, {s} estilos",
+        "{n} edges (no line styles)": "{n} aristas (sin estilos de línea)",
+        "While the dialog is open, a changed selection is read again by itself: select another floor plan and the walls follow.":
+            "Con el diálogo abierto, una selección nueva se lee sola: elija otra planta y los muros la siguen.",
+        "Take the current selection as the source now.": "Tomar ahora la selección actual como origen.",
+        "Walls: no floor plan in the selection — the source stays as it is.":
+            "Muros: no hay planta en la selección — el origen se mantiene.",
         "Switch off pieces under": "Desactivar piezas menores de",
         "Pieces smaller than this start switched off (window frame profiles, crumbs of the fill). 0 = keep all.":
             "Las piezas menores empiezan desactivadas (perfiles de ventana, restos del relleno). 0 = conservar todas.",
@@ -1636,24 +1653,26 @@ def _command_class():
             self.new = new
             self.select = select
             self._insert = InsertGroupCommand(new)
-            self._saved = set()
             self.rev = None
 
+        # The selection as it is NOW stays (minus the walls): the preview
+        # is rebuilt while the user selects another plan («Follow
+        # selection») — an older selection must not come back with it.
         def do(self, scene):
-            self._saved = set(scene.selection)
+            before = set(scene.selection)
             self._insert.do(scene)
             scene.selection.clear()
             if self.select:
                 scene.selection.add(self.new)
             else:
-                scene.selection.update(self._saved)
+                scene.selection.update(before - {self.new})
             scene.version += 1
 
         def undo(self, scene):
+            before = set(scene.selection)
             self._insert.undo(scene)
-            scene.selection.discard(self.new)
-            if not self.select:
-                scene.selection.update(self._saved)
+            scene.selection.clear()
+            scene.selection.update(before - {self.new})
             scene.version += 1
 
     _CMD = WallsCommand
@@ -1890,6 +1909,26 @@ def _back_to_select(app) -> None:
 # 5. The dialog (non-modal).
 # ---------------------------------------------------------------------------
 
+def read_source(scene) -> dict:
+    """The plan of the selection: ``{"src", "segs", "z", "label", "key"}`` —
+    a Plan Import 1.2+ sheet with its line styles, else the edges (loose or
+    in selected groups). Raises WallsError when there is no plan."""
+    from core.group import Group
+    src = plan_source(scene)
+    if src is not None:
+        name = next((g.name for g in scene.selection if isinstance(g, Group)
+                     and isinstance((getattr(g, "ext", None) or {}).get(PLAN_KEY), dict)), "")
+        n = len(src["all"])
+        return {"src": src, "segs": None, "z": src["z"],
+                "label": _tr("{name} — {n} lines, {s} line styles",
+                             name=name or _tr("Plan"), n=_num(n, 0), s=len(src["styles"])),
+                "key": ("src", name, n, round(float(src["all"].sum()), 3) if n else 0)}
+    segs, z = gather(scene)
+    return {"src": None, "segs": segs, "z": z,
+            "label": _tr("{n} edges (no line styles)", n=_num(len(segs), 0)),
+            "key": ("segs", len(segs), round(sum(map(sum, segs)), 3))}
+
+
 def _load_params() -> dict:
     import json
     try:
@@ -1951,22 +1990,17 @@ def _open_dialog(app) -> None:
     except Exception:  # noqa: BLE001
         _warn(viewport, _tr("Shapely is missing — this IngeTrazo cannot run the wall detection."))
         return
-    src = plan_source(viewport.scene)
-    segs = None
-    if src is not None:
-        z = src["z"]
-    else:
-        try:
-            segs, z = gather(viewport.scene)
-        except WallsError as exc:
-            _warn(viewport, str(exc))
-            return
+    try:
+        S = read_source(viewport.scene)
+    except WallsError as exc:
+        _warn(viewport, str(exc))
+        return
     old = _STATE.get("dialog")
     if old is not None:
         old.close()
 
     p = _load_params()
-    h = level_height(viewport.scene, z)
+    h = level_height(viewport.scene, S["z"])
     if h is not None:
         p["height"] = round(h, 3)
 
@@ -1986,47 +2020,73 @@ def _open_dialog(app) -> None:
         s.setKeyboardTracking(False)
         return s
 
+    # -- the source: the plan read at opening, followed while open --
+    boxs = QGroupBox(_tr("Source"), dlg)
+    vs = QVBoxLayout(boxs)
+    src_lbl = QLabel(dlg)
+    src_lbl.setWordWrap(True)
+    vs.addWidget(src_lbl)
+    srow = QHBoxLayout()
+    follow = QCheckBox("Follow selection", dlg)
+    follow.setToolTip(_tr("While the dialog is open, a changed selection is read again by itself: select another floor plan and the walls follow."))
+    srow.addWidget(follow)
+    srow.addStretch(1)
+    b_read = QPushButton("↻ Read selection", dlg)
+    b_read.setToolTip(_tr("Take the current selection as the source now."))
+    srow.addWidget(b_read)
+    vs.addLayout(srow)
+    lay.addWidget(boxs)
+
     # -- line styles (plans from Plan Import 1.2+) --
-    style_list = None
-    pick_btn = None
-    if src is not None:
-        box0 = QGroupBox(_tr("Line styles from the PDF — tick the walls"), dlg)
-        v0 = QVBoxLayout(box0)
-        style_list = QListWidget(dlg)
-        style_list.setMinimumHeight(150)
-        guess = set(guess_wall_styles(src, p))
-        styles = src["styles"]
-        order = sorted(range(len(styles)), key=lambda s: (
-            not styles[s].get("fill"),
-            -(styles[s]["area_m2"] if styles[s].get("fill") else styles[s]["len_m"])))
-        for sid in order:
-            st = styles[sid]
-            if st["len_m"] < 0.5 and st["area_m2"] < 0.05:
-                continue
-            pm = QPixmap(28, 16)
-            pm.fill(Qt.transparent)
-            pt = QPainter(pm)
-            col = QColor(*style_rgb(st))
-            if st.get("fill"):
-                pt.fillRect(2, 2, 24, 12, col)
-            else:
-                pen = QPen(col, max(1.0, float(st.get("w") or 0) * 6))
-                pt.setPen(pen)
-                pt.drawLine(2, 8, 26, 8)
-            pt.end()
-            size = (_tr("{a} m²", a=_num(st['area_m2'], 1)) if st.get("fill")
-                    else _tr("{m} m", m=_num(st['len_m'], 0)))
-            it = QListWidgetItem(QIcon(pm), f"{style_label(st)} · {size}")
-            it.setData(Qt.UserRole, sid)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked if sid in guess else Qt.Unchecked)
-            style_list.addItem(it)
-        v0.addWidget(style_list)
-        pick_btn = QPushButton(_tr("Click an example wall…"), dlg)
-        pick_btn.setCheckable(True)
-        pick_btn.setToolTip(_tr("Click a wall line or fill in the model: its line style is switched on (or off)."))
-        v0.addWidget(pick_btn)
-        lay.addWidget(box0)
+    box0 = QGroupBox(_tr("Line styles from the PDF — tick the walls"), dlg)
+    v0 = QVBoxLayout(box0)
+    style_list = QListWidget(dlg)
+    style_list.setMinimumHeight(150)
+    v0.addWidget(style_list)
+    pick_btn = QPushButton(_tr("Click an example wall…"), dlg)
+    pick_btn.setCheckable(True)
+    pick_btn.setToolTip(_tr("Click a wall line or fill in the model: its line style is switched on (or off)."))
+    v0.addWidget(pick_btn)
+    lay.addWidget(box0)
+
+    def fill_styles():
+        """The style list for the current source (hidden without styles)."""
+        src = S["src"]
+        style_list.blockSignals(True)
+        style_list.clear()
+        box0.setVisible(src is not None)
+        if src is not None:
+            guess = set(guess_wall_styles(src, p))
+            styles = src["styles"]
+            order = sorted(range(len(styles)), key=lambda s: (
+                not styles[s].get("fill"),
+                -(styles[s]["area_m2"] if styles[s].get("fill") else styles[s]["len_m"])))
+            for sid in order:
+                st = styles[sid]
+                if st["len_m"] < 0.5 and st["area_m2"] < 0.05:
+                    continue
+                pm = QPixmap(28, 16)
+                pm.fill(Qt.transparent)
+                pt = QPainter(pm)
+                col = QColor(*style_rgb(st))
+                if st.get("fill"):
+                    pt.fillRect(2, 2, 24, 12, col)
+                else:
+                    pen = QPen(col, max(1.0, float(st.get("w") or 0) * 6))
+                    pt.setPen(pen)
+                    pt.drawLine(2, 8, 26, 8)
+                pt.end()
+                size = (_tr("{a} m²", a=_num(st['area_m2'], 1)) if st.get("fill")
+                        else _tr("{m} m", m=_num(st['len_m'], 0)))
+                it = QListWidgetItem(QIcon(pm), f"{style_label(st)} · {size}")
+                it.setData(Qt.UserRole, sid)
+                it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                it.setCheckState(Qt.Checked if sid in guess else Qt.Unchecked)
+                style_list.addItem(it)
+        style_list.blockSignals(False)
+        src_lbl.setText(S["label"])
+        hint.setText(hint_base + ("" if src is not None else "\n" + _tr(
+            "Tip: import the PDF again with Plan Import 1.2 — then the walls are picked by their line style.")))
 
     box1 = QGroupBox(_tr("Detection"), dlg)
     f1 = QFormLayout(box1)
@@ -2068,11 +2128,9 @@ def _open_dialog(app) -> None:
     info = QLabel(dlg)
     info.setWordWrap(True)
     lay.addWidget(info)
-    hint = QLabel(_tr(
-        "Click a wall to switch it on/off, an opening to switch window → door → none. Shift-click adds any other face."), dlg)
-    if src is None:
-        hint.setText(hint.text() + "\n" + _tr(
-            "Tip: import the PDF again with Plan Import 1.2 — then the walls are picked by their line style."))
+    hint_base = _tr(
+        "Click a wall to switch it on/off, an opening to switch window → door → none. Shift-click adds any other face.")
+    hint = QLabel(hint_base, dlg)
     hint.setWordWrap(True)
     hint.setStyleSheet("color: palette(mid);")
     lay.addWidget(hint)
@@ -2088,13 +2146,13 @@ def _open_dialog(app) -> None:
     pv_lbl.setVisible(False)
     lay.addWidget(pv_lbl)
     row3 = QHBoxLayout()
-    pv_btn = QPushButton(_tr("Preview"), dlg)
+    pv_btn = QPushButton("Preview", dlg)
     pv_btn.setCheckable(True)
-    reset = QPushButton(_tr("Reset"), dlg)
+    reset = QPushButton("Reset", dlg)
     reset.setToolTip(_tr("Back to the default settings and the preselection."))
-    ok = QPushButton(_tr("Build"), dlg)
+    ok = QPushButton("OK", dlg)
     ok.setDefault(True)
-    cancel = QPushButton(_tr("Cancel"), dlg)
+    cancel = QPushButton("Cancel", dlg)
     row3.addWidget(pv_btn)
     row3.addWidget(reset)
     row3.addStretch(1)
@@ -2111,7 +2169,7 @@ def _open_dialog(app) -> None:
             "min_piece": small.value() / 1e4})
 
     def chosen_styles():
-        if style_list is None:
+        if S["src"] is None:
             return []
         return [style_list.item(i).data(Qt.UserRole)
                 for i in range(style_list.count())
@@ -2137,11 +2195,11 @@ def _open_dialog(app) -> None:
 
     def style_preview(on):
         if on:
-            pv_btn.setText(_tr("● Live Preview ON"))
+            pv_btn.setText("● Live Preview ON")
             pv_btn.setStyleSheet(pv_style_on)
             pv_btn.setToolTip(_tr("The preview follows every change by itself — click to switch it off."))
         else:
-            pv_btn.setText(_tr("Preview"))
+            pv_btn.setText("Preview")
             pv_btn.setStyleSheet("")
             pv_btn.setToolTip(_tr("Show the walls in the model; they then update by themselves on every change."))
             pv_lbl.setVisible(False)
@@ -2169,26 +2227,25 @@ def _open_dialog(app) -> None:
         undo_preview()
         if not pv_btn.isChecked():
             return
-        banner("busy", _tr("⟳ Updating the preview…"))
+        banner("busy", "⟳ Updating the preview…")
         QApplication.processEvents()
         walls, ops, (nw, nf, nd) = chosen_parts()
         pp = params()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            cmd = run_build(viewport, walls, ops, pp, z, select=False)
+            cmd = run_build(viewport, walls, ops, pp, S["z"], select=False)
         except Exception as exc:  # noqa: BLE001
-            banner("error", _tr("Preview failed: {e}", e=exc))
+            banner("error", f"Preview failed: {exc}")
             return
         finally:
             QApplication.restoreOverrideCursor()
         if cmd is None:
-            banner("live", _tr("● <b>LIVE PREVIEW</b> — nothing selected to build"))
+            banner("live", "● <b>LIVE PREVIEW</b> — nothing switched on to build")
             return
         cmd.rev = pv["rev"]
         pv["cmd"] = cmd
-        banner("live", _tr(
-            "● <b>LIVE PREVIEW</b> — {w} wall piece(s), {f} window(s), {d} door(s) · height {h} m · changes apply instantly",
-            w=nw, f=nf, d=nd, h=_num(pp["height"], 2)))
+        banner("live", f"● <b>LIVE PREVIEW</b> — {nw} wall pieces, {nf} windows, "
+               f"{nd} doors · height {pp['height']:.2f} m · changes apply instantly")
 
     pv_timer = QTimer(dlg)
     pv_timer.setSingleShot(True)
@@ -2199,7 +2256,7 @@ def _open_dialog(app) -> None:
         """Something the result depends on changed: a new revision."""
         pv["rev"] += 1
         if pv_btn.isChecked():
-            banner("busy", _tr("⟳ Updating the preview…"))
+            banner("busy", "⟳ Updating the preview…")
             pv_timer.start()
 
     def preview_toggled(on):
@@ -2231,10 +2288,10 @@ def _open_dialog(app) -> None:
         QApplication.processEvents()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            if src is not None:
-                _STATE["result"] = styled_detect(src, chosen_styles(), params())
+            if S["src"] is not None:
+                _STATE["result"] = styled_detect(S["src"], chosen_styles(), params())
             else:
-                _STATE["result"] = detect(segs, params())
+                _STATE["result"] = detect(S["segs"], params())
         finally:
             QApplication.restoreOverrideCursor()
         count_text()
@@ -2268,8 +2325,8 @@ def _open_dialog(app) -> None:
         opens.setChecked(d["openings"])
         for w in widgets:
             w.blockSignals(False)
-        if style_list is not None:
-            guess0 = set(guess_wall_styles(src, d))
+        if S["src"] is not None:
+            guess0 = set(guess_wall_styles(S["src"], d))
             style_list.blockSignals(True)
             for i in range(style_list.count()):
                 it = style_list.item(i)
@@ -2280,7 +2337,7 @@ def _open_dialog(app) -> None:
 
     def picked_style(sid):
         """A click on the model in «example wall» mode: that style on/off."""
-        if style_list is None:
+        if S["src"] is None:
             return
         for i in range(style_list.count()):
             it = style_list.item(i)
@@ -2326,7 +2383,7 @@ def _open_dialog(app) -> None:
             undo_preview()
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
-                cmd = run_build(viewport, walls, ops, pp, z)
+                cmd = run_build(viewport, walls, ops, pp, S["z"])
             except Exception as exc:  # noqa: BLE001
                 QApplication.restoreOverrideCursor()
                 _warn(viewport, str(exc))
@@ -2337,9 +2394,11 @@ def _open_dialog(app) -> None:
                 return
         viewport.flash_status(_tr("Built: {w} wall piece(s), {f} window(s), {d} door(s)",
                                   w=nw, f=nf, d=nd), 5000)
+        sel_timer.stop()
         dlg.accept()
 
     def on_rejected():
+        sel_timer.stop()
         timer.stop()
         pv_timer.stop()
         undo_preview()
@@ -2356,15 +2415,62 @@ def _open_dialog(app) -> None:
         except RuntimeError:          # the window is already gone
             pass
 
+    def sel_sig():
+        try:
+            return frozenset(id(e) for e in viewport.scene.selection)
+        except Exception:  # noqa: BLE001
+            return frozenset()
+
+    sig = {"v": sel_sig()}
+
+    def read_selection(manual):
+        """Take the current selection as the new source. A selection without
+        a plan — nothing, or only the walls — keeps the source as it is."""
+        try:
+            new = read_source(viewport.scene)
+        except WallsError:
+            if manual:
+                viewport.flash_status(_tr("Walls: no floor plan in the selection — the source stays as it is."), 4000)
+            return
+        if not manual and new["key"] == S["key"]:
+            return
+        S.update(new)
+        _STATE.update(z=S["z"], src=S["src"])
+        fill_styles()
+        detect_now()
+
+    def poll_selection():
+        if not follow.isChecked() or timer.isActive():
+            return
+        s = sel_sig()
+        if s != sig["v"]:
+            sig["v"] = s
+            read_selection(False)
+
+    def follow_toggled(on):
+        try:
+            from PySide6.QtCore import QSettings
+            QSettings().setValue(f"plugins/{KEY}/follow", bool(on))
+        except Exception:  # noqa: BLE001
+            pass
+        if on:                     # catch up with what changed meanwhile
+            sig["v"] = sel_sig()
+            read_selection(False)
+
+    sel_timer = QTimer(dlg)
+    sel_timer.setInterval(400)
+    sel_timer.timeout.connect(poll_selection)
+
     for w in (t_lo, t_hi, o_max, small):
         w.valueChanged.connect(lambda *_a: timer.start())
     for w in (pairs, opens):
         w.toggled.connect(lambda *_a: timer.start())
     for w in (height, sill, lintel):
         w.valueChanged.connect(lambda *_a: changed())
-    if style_list is not None:
-        style_list.itemChanged.connect(lambda *_a: timer.start())
-        pick_btn.toggled.connect(on_pick_toggled)
+    style_list.itemChanged.connect(lambda *_a: timer.start())
+    pick_btn.toggled.connect(on_pick_toggled)
+    follow.toggled.connect(follow_toggled)
+    b_read.clicked.connect(lambda: read_selection(True))
     b_all.clicked.connect(lambda: set_all(True))
     b_none.clicked.connect(lambda: set_all(False))
     ok.clicked.connect(on_ok)
@@ -2375,13 +2481,22 @@ def _open_dialog(app) -> None:
     dlg.finished.connect(on_finished)
     dlg.destroyed.connect(on_finished)
 
-    _STATE.update(dialog=dlg, z=z, on_change=count_text, src=src,
+    _STATE.update(dialog=dlg, z=S["z"], on_change=count_text, src=S["src"],
                   pick_style=False, on_pick=picked_style)
+    try:
+        from PySide6.QtCore import QSettings
+        follow.blockSignals(True)
+        follow.setChecked(QSettings().value(f"plugins/{KEY}/follow", True, type=bool))
+        follow.blockSignals(False)
+    except Exception:  # noqa: BLE001
+        follow.setChecked(True)
+    fill_styles()
     style_preview(False)
     dlg.show()
     dlg.raise_()
     detect_now()
     _activate_tool(app)
+    sel_timer.start()
     try:
         from PySide6.QtCore import QSettings
         want = QSettings().value(f"plugins/{KEY}/preview", True, type=bool)

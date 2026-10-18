@@ -21,7 +21,8 @@ Select the floor plan (the plan group Plan Import made, or loose edges) and run 
 - **Click an opening** to switch window → door → no opening.
 - **Shift-click** any other face of the drawing (a thick column, say) to add it as a wall.
 - **Live Preview** (as in every PESI3D plugin): the masonry stands in the model at once and follows every change — so you see whether every wall was caught. **Reset** = default settings and preselection.
-- **Build** keeps everything as **one group** (BIM: `IfcWall`) in one undo step; **Cancel** takes the preview back.
+- **Follow selection**: select another floor plan and the walls follow; **↻ Read selection** reads the selection at once.
+- **OK** keeps everything as **one group** (BIM: `IfcWall`) in one undo step; **Cancel** takes the preview back.
 
 ### Walls by line style (with Plan Import ≥ 1.2)
 CAD programs draw cut walls their own way — usually filled, else with the heaviest pen. A sheet imported with **Plan Import 1.2** remembers how each line was drawn. The dialog then lists the **line styles from the PDF** (swatch, fill or stroke width, area or length):
@@ -54,6 +55,7 @@ Strip windows and glass facades wider than *Max. opening width* (default 4 m) st
 Tip: crop the floor plan in Plan Import, so title block and frame stay out.
 
 ## Changelog
+- **1.2** — Preview as in every PESI3D plugin: a **Source** row with *Follow selection* (select another floor plan and the walls follow) and *↻ Read selection*; buttons *● Live Preview ON · Reset · OK · Cancel*. Fixed: rebuilding the preview brought back an older selection. Screenshot of the Musterhaus example.
 - **1.1** — **Live Preview** with banner, Reset. Unfilled **pockets** in the walls (corners, seams, crossings) are closed, shafts offered to click in. **Switch off pieces under … cm²**: frame profiles in openings and loose crumbs start switched off. Fixed: two equal halves of a fill (the triangles of a mitred corner) were taken for a duplicate — one went missing. Walls by **line style** (with Plan Import 1.2): list of line styles, wall fill preselected, **click an example wall**. Openings: windows with divided frames and rebates come out as one window, shafts between two walls are no longer doors, frame profiles drawn like the wall no longer split an opening. Layered walls are no longer taken for stairs. Errors show as a message (and go to `%LOCALAPPDATA%\IngeTrazo\walls_tool.log`). Much faster on big plans.
 - **1.0** — first release.
 
