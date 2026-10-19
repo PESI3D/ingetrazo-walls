@@ -11,7 +11,7 @@ Erzeugt aus einem importierten Grundriss (PDF über **Plan Import**, DXF/DWG) da
 2. `walls_tool.py` in diesen Ordner kopieren.
 3. IngeTrazo neu starten → **Extensions ▸ Mauerwerk ▸ Mauerwerk aus Plan…** (auch im Rechtsklick-Menü und als Icon in der eigenen Werkzeugleiste).
 
-Benötigt IngeTrazo ≥ 0.5 (Extension-API 2).
+Benötigt IngeTrazo ≥ 0.5.6 (Extension-API 2) · getestet mit IngeTrazo 0.5.8.
 
 ## Bedienung
 Den Grundriss auswählen (die Plan-Gruppe von Plan Import oder lose Kanten) und **Mauerwerk aus Plan…** starten. Die Vorauswahl erscheint farbig im Modell:

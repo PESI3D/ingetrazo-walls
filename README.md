@@ -11,7 +11,7 @@ Builds the **masonry** from an imported floor plan (PDF via **Plan Import**, DXF
 2. Copy `walls_tool.py` into that folder.
 3. Restart IngeTrazo → **Extensions ▸ Walls ▸ Walls from Plan…** (also on the right-click menu and as an icon on its own toolbar).
 
-Requires IngeTrazo ≥ 0.5 (extension API 2).
+Requires IngeTrazo ≥ 0.5.6 (extension API 2) · tested with IngeTrazo 0.5.8.
 
 ## How to use
 Select the floor plan (the plan group Plan Import made, or loose edges) and run **Walls from Plan…**. The preselection shows in the model:
